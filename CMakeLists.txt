@@ -8,4 +8,6 @@ add_executable(CompressionTool main.cpp
         bitstream.hpp
         huffman.cpp
         huffman.hpp
+        priority_queue.cpp
+        my_priority_queue.hpp
 )

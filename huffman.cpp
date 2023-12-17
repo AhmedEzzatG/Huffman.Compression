@@ -1,6 +1,8 @@
 
 #include "huffman.hpp"
 
+#include <memory>
+
 using namespace huffman;
 
 
@@ -15,27 +17,25 @@ unordered_map<char, int> generate_frequency_table(const string& file_name) {
 }
 
 
-shared_ptr<huffman_tree> huffman::build_huffman_tree(const unordered_map<char, int> & frequency_table) {
-    std::priority_queue<
-            std::pair<int, shared_ptr<huffman_tree>>,
-            vector<std::pair<int, shared_ptr<huffman_tree>>>,
-            std::greater<>> pq;
+unique_ptr<huffman_tree> huffman::build_huffman_tree(const unordered_map<char, int> & frequency_table) {
+    using node_type = std::pair<int, unique_ptr<huffman_tree>>;
+    my_priority_queue<node_type, vector<node_type>, std::greater<>> pq;
     for (auto &i: frequency_table) {
-        shared_ptr<huffman_tree> ptr(new huffman_tree(i.first));
-        pq.emplace(0, ptr);
+        pq.emplace(i.second, new huffman_tree(i.first));
     }
     while (pq.size() > 1) {
-        auto l = pq.top();
-        pq.pop();
-        auto r = pq.top();
-        pq.pop();
-        shared_ptr<huffman_tree> ptr(new huffman_tree(l.second, r.second));
-        pq.emplace(l.first + r.first, ptr);
+        node_type l, r;
+        pq.pop(l);
+        pq.pop(r);
+        unique_ptr<huffman_tree> ptr = std::make_unique<huffman_tree>(std::move(l.second), std::move(r.second));
+        pq.emplace(l.first + r.first, ptr.release());
     }
-    return pq.top().second;
+    node_type root;
+    pq.pop(root);
+    return std::move(root.second);
 }
 
-void _build_encoding_map(const shared_ptr<huffman_tree>& node, vector<bool>& code, unordered_map<char, vector<bool>>& encoding) {
+void _build_encoding_map(const unique_ptr<huffman_tree>& node, vector<bool>& code, unordered_map<char, vector<bool>>& encoding) {
     if (node->is_leaf()) {
         encoding[node->element] = code;
         return;
@@ -47,14 +47,14 @@ void _build_encoding_map(const shared_ptr<huffman_tree>& node, vector<bool>& cod
     code.pop_back();
 }
 
-unordered_map<char, vector<bool>> huffman::build_encoding_map(const shared_ptr<huffman_tree>& tree) {
+unordered_map<char, vector<bool>> huffman::build_encoding_map(const unique_ptr<huffman_tree>& tree) {
     vector<bool> code;
     unordered_map<char, vector<bool>> encoding;
     _build_encoding_map(tree, code, encoding);
     return encoding;
 }
 
-void serialize_tree(const shared_ptr<huffman_tree>& node, obitstream& bs) {
+void serialize_tree(const unique_ptr<huffman_tree>& node, obitstream& bs) {
     if (node->is_leaf()) {
         bs << true << node->element;
         return;
@@ -64,17 +64,17 @@ void serialize_tree(const shared_ptr<huffman_tree>& node, obitstream& bs) {
     serialize_tree(node->right, bs);
 }
 
-shared_ptr<huffman_tree> deserialize_tree(ibitstream& bs) {
+unique_ptr<huffman_tree> deserialize_tree(ibitstream& bs) {
     bool is_leaf;
     bs >> is_leaf;
     if (is_leaf) {
         char ch;
         bs >> ch;
-        return std::make_shared<huffman_tree>(ch);
+        return std::make_unique<huffman_tree>(ch);
     }
-    shared_ptr<huffman_tree> l = deserialize_tree(bs);
-    shared_ptr<huffman_tree> r = deserialize_tree(bs);
-    return std::make_shared<huffman_tree>(l, r);
+    unique_ptr<huffman_tree> l = deserialize_tree(bs);
+    unique_ptr<huffman_tree> r = deserialize_tree(bs);
+    return std::make_unique<huffman_tree>(std::move(l), std::move(r));
 }
 
 
@@ -100,11 +100,11 @@ void huffman::decompress(const string &file_name) {
     auto tree = deserialize_tree(bs);
     ofstream file(file_name + ".txt");
     while (true) {
-        shared_ptr<huffman_tree> node = tree;
+        huffman_tree const * node = tree.get();
         bool bit;
         while (!node->is_leaf()) {
             bs >> bit;
-            node = (bit ? node->right : node->left);
+            node = (bit ? node->right : node->left).get();
         }
         if (node->element == EOF) {
             return;
